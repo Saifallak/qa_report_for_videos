@@ -563,6 +563,35 @@ def get_video_duration(video_path: str) -> float:
         return 0.0
 
 
+def split_video_into_segments(video_path: str, output_pattern: str, segment_time_sec: int) -> list:
+    """تقسيم الفيديو إلى أجزاء باستخدام ffmpeg دون إعادة ترميز (سريع جداً)."""
+    import subprocess
+    import glob
+    try:
+        # التأكد من مسح أي أجزاء قديمة بنفس النمط
+        for f in glob.glob(output_pattern.replace("%03d", "*")):
+            try:
+                os.remove(f)
+            except:
+                pass
+            
+        cmd = [
+            "ffmpeg", "-y", "-i", video_path,
+            "-c", "copy", "-map", "0",
+            "-f", "segment", "-segment_time", str(segment_time_sec),
+            "-reset_timestamps", "1",
+            output_pattern
+        ]
+        print("🎬 جارٍ تقسيم الفيديو إلى أجزاء...")
+        subprocess.run(cmd, capture_output=True, check=True)
+        # البحث عن الملفات الناتجة وترتيبها
+        parts = sorted(glob.glob(output_pattern.replace("%03d", "*")))
+        return parts
+    except Exception as e:
+        print(f"⚠️ فشل تقسيم الفيديو: {e}")
+        return []
+
+
 def is_ffmpeg_available() -> bool:
     """تتحقق من وجود ffmpeg مثبت على النظام ومتاح في PATH."""
     return shutil.which("ffmpeg") is not None
@@ -653,6 +682,7 @@ def upload_and_wait_for_file(client, file_path: str):
 
 def main():
     global VIDEO_URL, PROCESSING_MODE
+    split_mode = False
     
     # ------------------------------------------------------------------------
     # إدخال البيانات تفاعلياً (تخطي البرومبت لو تم التشغيل في وضع غير تفاعلي TTY)
@@ -768,25 +798,27 @@ def main():
                 estimated_tokens = int(duration_sec * 258) + 5000
                 print(f"📊 التوكنز المقدرة لملف الفيديو: {estimated_tokens:,} توكن (الحد الأقصى للموديل: 1,048,576)")
                 
-                # إذا كانت التوكنز تتخطى 1 مليون، ونحن في وضع يسمح بالتحويل للصوت (auto أو audio_fallback)
+                # إذا كانت التوكنز تتخطى 1 مليون، ونحن في وضع يسمح بالتحويل للصوت (auto أو audio_fallback) أو التقسيم
                 if estimated_tokens > 1_000_000:
                     print(f"⚠️ تنبيه: الفيديو يتخطى الحد الأقصى للموديل ({estimated_tokens:,} > 1,000,000 توكن).")
                     
-                    use_audio = False
-                    if PROCESSING_MODE in ["auto", "audio_fallback"]:
-                        if sys.stdin.isatty():
-                            # نطلب قرار المستخدم تفاعلياً
-                            user_decision = get_interactive_input(
-                                "❓ هل تريد التحويل لاستخراج الصوت فقط لتفادي الفشل وتوفير كوتة الرفع؟ (yes / no)", 
-                                "yes"
-                            ).lower()
-                            if user_decision in ["y", "yes", "نعم"]:
-                                use_audio = True
-                        else:
-                            # في الوضع غير التفاعلي، نفترض القبول التلقائي للحفاظ على استمرار العمل
-                            use_audio = True
+                    choice = "3" # الافتراضي: معالجة الصوت فقط لتفادي الفشل
+                    if sys.stdin.isatty():
+                        print("\nالرجاء اختيار أحد الخيارات التالية لتفادي فشل العملية:")
+                        print("1 - اكمل رفع الفيديو ؟")
+                        print("2 - ااقسمه علي فيديوهات تقريبا كل فيديو بحد اقصي ٧٠٠ الف (كل جزء 45 دقيقة)")
+                        print("3 - نروح للصوت وبس بقي")
+                        
+                        while True:
+                            choice = get_interactive_input("❓ أدخل رقم الخيار المناسب [1-3]", "3").strip()
+                            if choice in ["1", "2", "3"]:
+                                break
+                            print("❌ إدخال غير صالح. الرجاء إدخال 1 أو 2 أو 3")
 
-                    if use_audio:
+                    if choice == "2":
+                        split_mode = True
+                        print("📌 تم اختيار تقسيم الفيديو إلى أجزاء...")
+                    elif choice == "3":
                         print("📌 تم اختيار التحويل لمعالجة الصوت فقط...")
                         # استخراج الصوت وتحويل مسار الرفع إليه
                         audio_extracted = extract_audio_with_ffmpeg(VIDEO_PATH, TEMP_AUDIO_PATH)
@@ -798,84 +830,181 @@ def main():
                         else:
                             print("⚠️ تعذر استخراج الصوت، سيتم محاولة رفع الفيديو بالرغم من كبر حجمه.")
                     else:
-                        print("⚠️ سيتم المتابعة ورفع ملف الفيديو بالرغم من تجاوز الحد الأقصى المتوقع للتوكنز.")
+                        print("⚠️ سيتم المتابعة ورفع ملف الفيديو الكامل بالرغم من تجاوز الحد الأقصى المتوقع للتوكنز.")
 
-        # ------------------------------------------------------------------
-        # الخطوة 3: رفع الملف إلى Gemini File API وانتظار اكتمال المعالجة
-        # ------------------------------------------------------------------
-        uploaded_file_ref = upload_and_wait_for_file(client, file_to_upload)
-
-        # حساب التوكنز الفعلية قبل إرسال الطلب للموديل لتوفير معلومات دقيقة للمستخدم
-        try:
-            print("📊 جارٍ حساب التوكنز الفعلية للطلب...")
-            token_count_resp = client.models.count_tokens(
-                model=MODEL_NAME,
-                contents=[uploaded_file_ref, EVALUATION_PROMPT]
-            )
-            exact_tokens = token_count_resp.total_tokens
-            print(f"🎯 التوكنز الفعلية للطلب (الملف + البرومبت): {exact_tokens:,} توكن.")
-            if exact_tokens > 1_048_576:
-                print(f"⚠️ تحذير: التوكنز الفعلية تتجاوز حد الموديل (1,048,576). قد يفشل الطلب.")
-        except Exception as cnt_err:
-            print(f"⚠️ تعذر حساب التوكنز الفعلية بدقة: {cnt_err}")
-
-        # ------------------------------------------------------------------
-        # الخطوة 4: إرسال طلب التقييم إلى الموديل مع الملف والبرومبت
-        # ------------------------------------------------------------------
-        print(f"🤖 جارٍ إرسال طلب التحليل إلى الموديل ({MODEL_NAME}) ...")
-        print("   (قد تستغرق هذه الخطوة عدة دقائق نظراً لطول الفيديو)")
-
-        try:
-            response = client.models.generate_content(
-                model=MODEL_NAME,
-                contents=[uploaded_file_ref, EVALUATION_PROMPT],
-            )
-            report_text = response.text
-        except Exception as api_err:
-            # إذا كان الملف الذي تم رفعه هو الفيديو الكامل ووضع المعالجة هو audio_fallback، نحاول استخراج الصوت كبديل تلقائي
-            if file_to_upload == VIDEO_PATH and PROCESSING_MODE == "audio_fallback":
-                print(f"⚠️ فشل التحليل باستخدام الفيديو الكامل: {api_err}")
-                print("📌 محاولة استخراج الصوت ورفعه كخيار بديل لتفادي المشكلة...")
+        if split_mode:
+            # تقسيم الفيديو إلى أجزاء (كل جزء 2700 ثانية = 45 دقيقة)
+            _, ext = os.path.splitext(VIDEO_PATH)
+            output_pattern = os.path.join(tempfile.gettempdir(), f"part_%03d{ext}")
+            parts = split_video_into_segments(VIDEO_PATH, output_pattern, 2700)
+            
+            if not parts:
+                raise RuntimeError("تعذر تقسيم الفيديو إلى أجزاء.")
                 
-                audio_extracted = extract_audio_with_ffmpeg(VIDEO_PATH, TEMP_AUDIO_PATH)
-                if audio_extracted:
-                    try:
-                        # حذف ملف الفيديو القديم من سيرفرات Google لتوفير المساحة والخصوصية
+            print(f"✅ تم تقسيم الفيديو بنجاح إلى {len(parts)} أجزاء.")
+            
+            # معالجة الأجزاء جزءاً جزءاً
+            part_reports = []
+            for idx, part_path in enumerate(parts):
+                print("\n" + "-" * 70)
+                print(f"📤 معالجة الجزء {idx+1} من {len(parts)} ({os.path.basename(part_path)}) ...")
+                print("-" * 70)
+                
+                # رفع الجزء
+                uploaded_part_ref = upload_and_wait_for_file(client, part_path)
+                
+                # حساب التوكنز الفعلية للجزء
+                try:
+                    token_count_resp = client.models.count_tokens(
+                        model=MODEL_NAME,
+                        contents=[uploaded_part_ref, EVALUATION_PROMPT]
+                    )
+                    print(f"🎯 التوكنز الفعلية للجزء {idx+1}: {token_count_resp.total_tokens:,} توكن.")
+                except Exception as cnt_err:
+                    print(f"⚠️ تعذر حساب التوكنز للجزء: {cnt_err}")
+                
+                # إرسال طلب التحليل للجزء
+                print(f"🤖 تحليل الجزء {idx+1}...")
+                part_response = client.models.generate_content(
+                    model=MODEL_NAME,
+                    contents=[uploaded_part_ref, EVALUATION_PROMPT],
+                )
+                part_text = part_response.text
+                if not part_text or not part_text.strip():
+                    raise ValueError(f"رد الموديل للجزء {idx+1} جاء فارغاً.")
+                    
+                part_reports.append(part_text)
+                
+                # تسجيل الكوتة والتكلفة للجزء
+                input_tokens = 0
+                output_tokens = 0
+                if part_response.usage_metadata:
+                    input_tokens = part_response.usage_metadata.prompt_token_count or 0
+                    output_tokens = part_response.usage_metadata.candidates_token_count or 0
+                update_and_report_usage(MODEL_NAME, input_tokens, output_tokens)
+                
+                # تنظيف خادم Google والملف المحلي للجزء
+                try:
+                    client.files.delete(name=uploaded_part_ref.name)
+                    print(f"🧹 تم حذف ملف الجزء {idx+1} من سيرفرات Google.")
+                except Exception as del_err:
+                    print(f"⚠️ تعذر حذف ملف الجزء {idx+1}: {del_err}")
+                try:
+                    os.remove(part_path)
+                except:
+                    pass
+            
+            # تصفير المرجع لتجنب حذفه مرة أخرى في finally
+            uploaded_file_ref = None
+            
+            # دمج التقارير
+            print("\n" + "=" * 70)
+            print("🤖 جارٍ دمج التقارير المجزأة في تقرير نهائي متناسق...")
+            print("=" * 70)
+            
+            merge_prompt = (
+                "أنت مسؤول جودة تعليمية خبير. لديك أدناه تقارير تقييم جودة مجزأة لمحاضرة واحدة تم تقسيمها إلى أجزاء.\n"
+                "المطلوب منك هو دمج هذه التقارير في تقرير واحد شامل ومتناسق يتبع نفس الهيكل والجدول والدرجة النهائية (من 64).\n"
+                "قم بدمج الملاحظات ونقاط القوة والضعف وجدول التقييم والدرجات بشكل منطقي ومتسق.\n\n"
+                "التقارير المجزأة هي:\n\n"
+            )
+            for idx, r_text in enumerate(part_reports):
+                merge_prompt += f"--- تقرير الجزء {idx+1} ---\n{r_text}\n\n"
+                
+            merge_response = client.models.generate_content(
+                model=MODEL_NAME,
+                contents=[merge_prompt],
+            )
+            report_text = merge_response.text
+            
+            if not report_text or not report_text.strip():
+                raise ValueError("فشل الموديل في دمج التقارير وجاء الرد فارغاً.")
+                
+            # تسجيل كوتة الدمج
+            input_tokens = 0
+            output_tokens = 0
+            if merge_response.usage_metadata:
+                input_tokens = merge_response.usage_metadata.prompt_token_count or 0
+                output_tokens = merge_response.usage_metadata.candidates_token_count or 0
+            usage_report_markdown = update_and_report_usage(MODEL_NAME, input_tokens, output_tokens)
+            
+        else:
+            # ------------------------------------------------------------------
+            # الخطوة 3: رفع الملف إلى Gemini File API وانتظار اكتمال المعالجة
+            # ------------------------------------------------------------------
+            uploaded_file_ref = upload_and_wait_for_file(client, file_to_upload)
+
+            # حساب التوكنز الفعلية قبل إرسال الطلب للموديل لتوفير معلومات دقيقة للمستخدم
+            try:
+                print("📊 جارٍ حساب التوكنز الفعلية للطلب...")
+                token_count_resp = client.models.count_tokens(
+                    model=MODEL_NAME,
+                    contents=[uploaded_file_ref, EVALUATION_PROMPT]
+                )
+                exact_tokens = token_count_resp.total_tokens
+                print(f"🎯 التوكنز الفعلية للطلب (الملف + البرومبت): {exact_tokens:,} توكن.")
+                if exact_tokens > 1_048_576:
+                    print(f"⚠️ تحذير: التوكنز الفعلية تتجاوز حد الموديل (1,048,576). قد يفشل الطلب.")
+            except Exception as cnt_err:
+                print(f"⚠️ تعذر حساب التوكنز الفعلية بدقة: {cnt_err}")
+
+            # ------------------------------------------------------------------
+            # الخطوة 4: إرسال طلب التقييم إلى الموديل مع الملف والبرومبت
+            # ------------------------------------------------------------------
+            print(f"🤖 جارٍ إرسال طلب التحليل إلى الموديل ({MODEL_NAME}) ...")
+            print("   (قد تستغرق هذه الخطوة عدة دقائق نظراً لطول الفيديو)")
+
+            try:
+                response = client.models.generate_content(
+                    model=MODEL_NAME,
+                    contents=[uploaded_file_ref, EVALUATION_PROMPT],
+                )
+                report_text = response.text
+            except Exception as api_err:
+                # إذا كان الملف الذي تم رفعه هو الفيديو الكامل ووضع المعالجة هو audio_fallback، نحاول استخراج الصوت كبديل تلقائي
+                if file_to_upload == VIDEO_PATH and PROCESSING_MODE == "audio_fallback":
+                    print(f"⚠️ فشل التحليل باستخدام الفيديو الكامل: {api_err}")
+                    print("📌 محاولة استخراج الصوت ورفعه كخيار بديل لتفادي المشكلة...")
+                    
+                    audio_extracted = extract_audio_with_ffmpeg(VIDEO_PATH, TEMP_AUDIO_PATH)
+                    if audio_extracted:
                         try:
-                            client.files.delete(name=uploaded_file_ref.name)
-                            print("🧹 تم حذف ملف الفيديو القديم من سيرفرات Google.")
-                        except Exception as del_err:
-                            print(f"⚠️ تعذر حذف ملف الفيديو القديم: {del_err}")
-                            
-                        # رفع ملف الصوت الجديد
-                        uploaded_file_ref = upload_and_wait_for_file(client, TEMP_AUDIO_PATH)
-                        print("🤖 إعادة إرسال طلب التحليل إلى الموديل باستخدام ملف الصوت البديل...")
-                        response = client.models.generate_content(
-                            model=MODEL_NAME,
-                            contents=[uploaded_file_ref, EVALUATION_PROMPT],
-                        )
-                        report_text = response.text
-                        # تحديث مسار الملف المرفوع لضمان تنظيفه في كتلة finally
-                        file_to_upload = TEMP_AUDIO_PATH
-                    except Exception as fallback_err:
-                        raise RuntimeError(f"فشلت المحاولة البديلة أيضاً باستخدام الصوت.\nخطأ محاولة الصوت: {fallback_err}\nخطأ محاولة الفيديو الأصلية: {api_err}")
+                            # حذف ملف الفيديو القديم من سيرفرات Google لتوفير المساحة والخصوصية
+                            try:
+                                client.files.delete(name=uploaded_file_ref.name)
+                                print("🧹 تم حذف ملف الفيديو القديم من سيرفرات Google.")
+                            except Exception as del_err:
+                                print(f"⚠️ تعذر حذف ملف الفيديو القديم: {del_err}")
+                                
+                            # رفع ملف الصوت الجديد
+                            uploaded_file_ref = upload_and_wait_for_file(client, TEMP_AUDIO_PATH)
+                            print("🤖 إعادة إرسال طلب التحليل إلى الموديل باستخدام ملف الصوت البديل...")
+                            response = client.models.generate_content(
+                                model=MODEL_NAME,
+                                contents=[uploaded_file_ref, EVALUATION_PROMPT],
+                            )
+                            report_text = response.text
+                            # تحديث مسار الملف المرفوع لضمان تنظيفه في كتلة finally
+                            file_to_upload = TEMP_AUDIO_PATH
+                        except Exception as fallback_err:
+                            raise RuntimeError(f"فشلت المحاولة البديلة أيضاً باستخدام الصوت.\nخطأ محاولة الصوت: {fallback_err}\nخطأ محاولة الفيديو الأصلية: {api_err}")
+                    else:
+                        raise RuntimeError(f"فشل التحليل باستخدام الفيديو الأصلي ({api_err})، ولم يتوفر ffmpeg أو تعذر استخراج الصوت كخيار بديل.")
                 else:
-                    raise RuntimeError(f"فشل التحليل باستخدام الفيديو الأصلي ({api_err})، ولم يتوفر ffmpeg أو تعذر استخراج الصوت كخيار بديل.")
-            else:
-                raise api_err
+                    raise api_err
 
-        if not report_text or not report_text.strip():
-            raise ValueError("رد الموديل جاء فارغاً دون أي محتوى نصي.")
+            if not report_text or not report_text.strip():
+                raise ValueError("رد الموديل جاء فارغاً دون أي محتوى نصي.")
 
-        # الحصول على بيانات الاستهلاك (usage_metadata)
-        input_tokens = 0
-        output_tokens = 0
-        if response.usage_metadata:
-            input_tokens = response.usage_metadata.prompt_token_count or 0
-            output_tokens = response.usage_metadata.candidates_token_count or 0
+            # الحصول على بيانات الاستهلاك (usage_metadata)
+            input_tokens = 0
+            output_tokens = 0
+            if response.usage_metadata:
+                input_tokens = response.usage_metadata.prompt_token_count or 0
+                output_tokens = response.usage_metadata.candidates_token_count or 0
 
-        # تحديث وحساب الاستهلاك والتكلفة والكوتة
-        usage_report_markdown = update_and_report_usage(MODEL_NAME, input_tokens, output_tokens)
+            # تحديث وحساب الاستهلاك والتكلفة والكوتة
+            usage_report_markdown = update_and_report_usage(MODEL_NAME, input_tokens, output_tokens)
 
         # ------------------------------------------------------------------
         # الخطوة 5: حفظ التقرير النهائي في ملف المخرجات
