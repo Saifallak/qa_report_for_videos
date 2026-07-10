@@ -332,6 +332,18 @@ def update_and_report_usage(model_name: str, input_tokens: int, output_tokens: i
     return usage_report
 
 
+def get_interactive_input(prompt_text: str, default_val: str) -> str:
+    """يطلب المدخلات تفاعلياً من المستخدم مع عرض القيمة الافتراضية."""
+    if not sys.stdin.isatty():
+        return default_val
+    try:
+        user_input = input(f"{prompt_text} [{default_val}]: ").strip()
+        return user_input if user_input else default_val
+    except (EOFError, KeyboardInterrupt):
+        print(f"\n⚠️ تم استخدام القيمة الافتراضية: {default_val}")
+        return default_val
+
+
 # ==============================================================================
 # 3) دالة مساعدة: كتابة رسالة خطأ مفصلة داخل ملف المخرجات بدل توقف السكربت
 # ==============================================================================
@@ -568,6 +580,29 @@ def upload_and_wait_for_file(client, file_path: str):
 # ==============================================================================
 
 def main():
+    global VIDEO_URL, PROCESSING_MODE
+    
+    # ------------------------------------------------------------------------
+    # إدخال البيانات تفاعلياً (تخطي البرومبت لو تم التشغيل في وضع غير تفاعلي TTY)
+    # ------------------------------------------------------------------------
+    if sys.stdin.isatty():
+        print("\n" + "=" * 70)
+        print("💡 إعداد تشغيل السكربت تفاعلياً:")
+        print("   (اضغط Enter مباشرة لاعتماد القيمة الافتراضية المعروضة بين الأقواس)")
+        print("=" * 70)
+        
+        VIDEO_URL = get_interactive_input("🔗 أدخل رابط الفيديو (أو رابط SharePoint)", VIDEO_URL)
+        
+        # التأكد من صحة خيار وضع المعالجة
+        while True:
+            mode_input = get_interactive_input("🎧 اختر وضع المعالجة (auto / audio / video)", PROCESSING_MODE).lower()
+            if mode_input in ["auto", "audio", "video"]:
+                PROCESSING_MODE = mode_input
+                break
+            print("❌ اختيار غير صالح. الرجاء كتابة: auto أو audio أو video")
+            
+        print("=" * 70 + "\n")
+
     # ------------------------------------------------------------------------
     # الخطوة 0 (اختيارية): تحميل الفيديو من رابط مباشر (مثل SharePoint) أولاً
     # تعمل فقط لو تم ضبط VIDEO_URL؛ وإلا يتم تخطيها والاعتماد على VIDEO_PATH
