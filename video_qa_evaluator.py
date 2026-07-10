@@ -760,7 +760,9 @@ def main():
         # طباعة الموديلات المتاحة لمساعدة المستخدم في معرفة الموديل الفعّال لحسابه
         try:
             available_models = [m.name.replace("models/", "") for m in client.models.list()]
-            print(f"📋 الموديلات المتاحة لحسابك (API Key): {', '.join(available_models)}")
+            print(f"📋 الموديلات المتاحة لحسابك (API Key): {len(available_models)} موديل")
+            for i, m in enumerate(available_models, 1):
+                print(f"   {i:>2}. {m}")
         except Exception as list_err:
             print(f"⚠️ تعذر سرد الموديلات المتاحة: {list_err}")
 
