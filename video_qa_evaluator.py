@@ -654,12 +654,44 @@ def main():
         print(f"🤖 جارٍ إرسال طلب التحليل إلى الموديل ({MODEL_NAME}) ...")
         print("   (قد تستغرق هذه الخطوة عدة دقائق نظراً لطول الفيديو)")
 
-        response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=[uploaded_file_ref, EVALUATION_PROMPT],
-        )
-
-        report_text = response.text
+        try:
+            response = client.models.generate_content(
+                model=MODEL_NAME,
+                contents=[uploaded_file_ref, EVALUATION_PROMPT],
+            )
+            report_text = response.text
+        except Exception as api_err:
+            # إذا كان الملف الذي تم رفعه هو الفيديو الكامل، نحاول استخراج الصوت وتجربته كبديل تلقائي
+            if file_to_upload == VIDEO_PATH:
+                print(f"⚠️ فشل التحليل باستخدام الفيديو الكامل: {api_err}")
+                print("📌 محاولة استخراج الصوت ورفعه كخيار بديل لتفادي المشكلة...")
+                
+                audio_extracted = extract_audio_with_ffmpeg(VIDEO_PATH, TEMP_AUDIO_PATH)
+                if audio_extracted:
+                    try:
+                        # حذف ملف الفيديو القديم من سيرفرات Google لتوفير المساحة والخصوصية
+                        try:
+                            client.files.delete(name=uploaded_file_ref.name)
+                            print("🧹 تم حذف ملف الفيديو القديم من سيرفرات Google.")
+                        except Exception as del_err:
+                            print(f"⚠️ تعذر حذف ملف الفيديو القديم: {del_err}")
+                            
+                        # رفع ملف الصوت الجديد
+                        uploaded_file_ref = upload_and_wait_for_file(client, TEMP_AUDIO_PATH)
+                        print("🤖 إعادة إرسال طلب التحليل إلى الموديل باستخدام ملف الصوت البديل...")
+                        response = client.models.generate_content(
+                            model=MODEL_NAME,
+                            contents=[uploaded_file_ref, EVALUATION_PROMPT],
+                        )
+                        report_text = response.text
+                        # تحديث مسار الملف المرفوع لضمان تنظيفه في كتلة finally
+                        file_to_upload = TEMP_AUDIO_PATH
+                    except Exception as fallback_err:
+                        raise RuntimeError(f"فشلت المحاولة البديلة أيضاً باستخدام الصوت.\nخطأ محاولة الصوت: {fallback_err}\nخطأ محاولة الفيديو الأصلية: {api_err}")
+                else:
+                    raise RuntimeError(f"فشل التحليل باستخدام الفيديو الأصلي ({api_err})، ولم يتوفر ffmpeg أو تعذر استخراج الصوت كخيار بديل.")
+            else:
+                raise api_err
 
         if not report_text or not report_text.strip():
             raise ValueError("رد الموديل جاء فارغاً دون أي محتوى نصي.")
