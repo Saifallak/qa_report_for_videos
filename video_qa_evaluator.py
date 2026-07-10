@@ -401,12 +401,36 @@ def write_error_report(error_stage: str, exception: Exception) -> None:
     except Exception as tracker_err:
         quota_details = f"\n\n*(تعذر تحميل تفاصيل الكوتة: {tracker_err})*"
 
+    # استخراج أي تفاصيل إضافية من استجابة API الخاصة بـ Google GenAI
+    api_error_extra = ""
+    try:
+        if hasattr(exception, "code") and exception.code:
+            api_error_extra += f"- **HTTP Status Code:** {exception.code}\n"
+        if hasattr(exception, "message") and exception.message:
+            api_error_extra += f"- **API Error Message:** {exception.message}\n"
+        if hasattr(exception, "status") and exception.status:
+            api_error_extra += f"- **API Status Code:** {exception.status}\n"
+        
+        # في حال وجود أخطاء خام مضمنة (Raw Response JSON)
+        if hasattr(exception, "errors") and exception.errors:
+            api_error_extra += f"- **Raw Errors Details (errors):**\n```json\n{json.dumps(exception.errors, indent=2, ensure_ascii=False)}\n```\n"
+        elif hasattr(exception, "response") and exception.response:
+            try:
+                res_json = exception.response.json()
+                api_error_extra += f"- **Raw API JSON Response (response):**\n```json\n{json.dumps(res_json, indent=2, ensure_ascii=False)}\n```\n"
+            except:
+                pass
+    except Exception as extra_err:
+        api_error_extra = f"\n*(تعذر استخراج التفاصيل الإضافية: {extra_err})*"
+
     error_details = (
         f"# ⚠️ تقرير خطأ - فشل تقييم الفيديو\n\n"
         f"**تاريخ ووقت الخطأ:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
         f"**مرحلة حدوث الخطأ:** {error_stage}\n\n"
         f"**نوع الخطأ:** {type(exception).__name__}\n\n"
         f"**رسالة الخطأ:**\n```\n{str(exception)}\n```\n\n"
+        f"**تفاصيل تقنية للخطأ (API Diagnostics):**\n"
+        f"{api_error_extra if api_error_extra else 'لا توجد تفاصيل إضافية.'}\n\n"
         f"**تفاصيل تقنية كاملة (Traceback):**\n```\n{traceback.format_exc()}\n```\n"
         f"{quota_details}"
     )
