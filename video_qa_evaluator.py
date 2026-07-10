@@ -35,6 +35,13 @@ import subprocess
 import traceback
 from datetime import datetime
 
+# محاولة تحميل مكتبة python-dotenv لقراءة ملف .env تلقائياً إذا كان موجوداً
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # ==============================================================================
 # 1) إعدادات المستخدم (المتغيرات القابلة للتعديل)
 # ==============================================================================
