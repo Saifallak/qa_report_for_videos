@@ -515,6 +515,54 @@ def download_video_from_url(video_url: str, destination_path: str, cookies_file:
 # 4) دالة استخراج الصوت من الفيديو باستخدام ffmpeg (مع Fallback ذكي)
 # ==============================================================================
 
+def get_video_duration(video_path: str) -> float:
+    """الحصول على طول الفيديو بالثواني باستخدام ffprobe/ffmpeg."""
+    import subprocess
+    # نتحقق أولاً من توفر ffprobe
+    if shutil.which("ffprobe") is None:
+        # إذا كان غير متوفر، نحاول استخدام ffmpeg كبديل
+        if shutil.which("ffmpeg") is None:
+            return 0.0
+        try:
+            cmd = ["ffmpeg", "-i", video_path]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            for line in result.stderr.split("\n"):
+                if "Duration" in line:
+                    parts = line.split("Duration:")[1].split(",")[0].strip().split(":")
+                    hours = float(parts[0])
+                    minutes = float(parts[1])
+                    seconds = float(parts[2])
+                    return hours * 3600 + minutes * 60 + seconds
+        except:
+            pass
+        return 0.0
+
+    try:
+        cmd = [
+            "ffprobe", "-v", "error", 
+            "-show_entries", "format=duration", 
+            "-of", "default=noprint_wrappers=1:nokey=1", 
+            video_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        return float(result.stdout.strip())
+    except Exception:
+        # محاولة أخيرة بـ ffmpeg
+        try:
+            cmd = ["ffmpeg", "-i", video_path]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            for line in result.stderr.split("\n"):
+                if "Duration" in line:
+                    parts = line.split("Duration:")[1].split(",")[0].strip().split(":")
+                    hours = float(parts[0])
+                    minutes = float(parts[1])
+                    seconds = float(parts[2])
+                    return hours * 3600 + minutes * 60 + seconds
+        except:
+            pass
+        return 0.0
+
+
 def is_ffmpeg_available() -> bool:
     """تتحقق من وجود ffmpeg مثبت على النظام ومتاح في PATH."""
     return shutil.which("ffmpeg") is not None
@@ -707,9 +755,54 @@ def main():
                 print("   ⚠️ فشل استخراج الصوت. سيتم رفع ملف الفيديو الأصلي كاملاً (Fallback).")
 
         # ------------------------------------------------------------------
+        # الخطوة 2.5: تقدير عدد التوكنز مسبقاً قبل الرفع لتوفير وقت وموارد المستخدم
+        # ------------------------------------------------------------------
+        duration_sec = get_video_duration(file_to_upload)
+        if duration_sec > 0:
+            if file_to_upload == TEMP_AUDIO_PATH:
+                # الصوت يستهلك حوالي 80 توكن لكل ثانية
+                estimated_tokens = int(duration_sec * 80) + 5000
+                print(f"📊 التوكنز المقدرة للملف الصوتي: {estimated_tokens:,} توكن (الحد الأقصى للموديل: 1,048,576)")
+            else:
+                # الفيديو يستهلك 258 توكن لكل ثانية (إطار واحد لكل ثانية)
+                estimated_tokens = int(duration_sec * 258) + 5000
+                print(f"📊 التوكنز المقدرة لملف الفيديو: {estimated_tokens:,} توكن (الحد الأقصى للموديل: 1,048,576)")
+                
+                # إذا كانت التوكنز تتخطى 1 مليون، ونحن في وضع يسمح بالتحويل للصوت (auto أو audio_fallback)
+                if estimated_tokens > 1_000_000:
+                    print(f"⚠️ تنبيه: الفيديو يتخطى الحد الأقصى للموديل ({estimated_tokens:,} > 1,000,000 توكن).")
+                    if PROCESSING_MODE in ["auto", "audio_fallback"]:
+                        print("📌 سيتم التحويل تلقائياً لمعالجة الصوت فقط لتجنب فشل العملية وتوفير وقت الرفع والتوكنز...")
+                        # استخراج الصوت وتحويل مسار الرفع إليه
+                        audio_extracted = extract_audio_with_ffmpeg(VIDEO_PATH, TEMP_AUDIO_PATH)
+                        if audio_extracted:
+                            file_to_upload = TEMP_AUDIO_PATH
+                            duration_sec = get_video_duration(file_to_upload)
+                            estimated_tokens = int(duration_sec * 80) + 5000
+                            print(f"📊 التوكنز المقدرة لملف الصوت الجديد: {estimated_tokens:,} توكن.")
+                        else:
+                            print("⚠️ تعذر استخراج الصوت، سيتم محاولة رفع الفيديو بالرغم من كبر حجمه.")
+                    else:
+                        print("⚠️ تحذير: قد تفشل العملية بسبب تخطي حدود الموديل. ننصح باستخدام وضع audio أو audio_fallback للجلسات الطويلة.")
+
+        # ------------------------------------------------------------------
         # الخطوة 3: رفع الملف إلى Gemini File API وانتظار اكتمال المعالجة
         # ------------------------------------------------------------------
         uploaded_file_ref = upload_and_wait_for_file(client, file_to_upload)
+
+        # حساب التوكنز الفعلية قبل إرسال الطلب للموديل لتوفير معلومات دقيقة للمستخدم
+        try:
+            print("📊 جارٍ حساب التوكنز الفعلية للطلب...")
+            token_count_resp = client.models.count_tokens(
+                model=MODEL_NAME,
+                contents=[uploaded_file_ref, EVALUATION_PROMPT]
+            )
+            exact_tokens = token_count_resp.total_tokens
+            print(f"🎯 التوكنز الفعلية للطلب (الملف + البرومبت): {exact_tokens:,} توكن.")
+            if exact_tokens > 1_048_576:
+                print(f"⚠️ تحذير: التوكنز الفعلية تتجاوز حد الموديل (1,048,576). قد يفشل الطلب.")
+        except Exception as cnt_err:
+            print(f"⚠️ تعذر حساب التوكنز الفعلية بدقة: {cnt_err}")
 
         # ------------------------------------------------------------------
         # الخطوة 4: إرسال طلب التقييم إلى الموديل مع الملف والبرومبت
