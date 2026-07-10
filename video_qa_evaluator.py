@@ -619,11 +619,11 @@ def main():
         
         # التأكد من صحة خيار وضع المعالجة
         while True:
-            mode_input = get_interactive_input("🎧 اختر وضع المعالجة (auto / audio / video)", PROCESSING_MODE).lower()
-            if mode_input in ["auto", "audio", "video"]:
+            mode_input = get_interactive_input("🎧 اختر وضع المعالجة (auto / audio / video / audio_fallback)", PROCESSING_MODE).lower()
+            if mode_input in ["auto", "audio", "video", "audio_fallback"]:
                 PROCESSING_MODE = mode_input
                 break
-            print("❌ اختيار غير صالح. الرجاء كتابة: auto أو audio أو video")
+            print("❌ اختيار غير صالح. الرجاء كتابة: auto أو audio أو video أو audio_fallback")
             
         print("=" * 70 + "\n")
 
@@ -690,7 +690,11 @@ def main():
             
         elif PROCESSING_MODE == "video":
             file_to_upload = VIDEO_PATH
-            print("📌 تم اختيار وضع الفيديو فقط (video). سيتم رفع الفيديو كاملاً مباشرة.")
+            print("📌 تم اختيار وضع الفيديو فقط (video). سيتم رفع الفيديو كاملاً مباشرة (دون تراجع للصوت).")
+
+        elif PROCESSING_MODE == "audio_fallback":
+            file_to_upload = VIDEO_PATH
+            print("📌 تم اختيار وضع الفيديو مع إمكانية الارتداد للصوت (audio_fallback). سيتم رفع الفيديو أولاً.")
             
         else: # auto
             print("📌 تم اختيار الوضع التلقائي (auto). محاولة استخراج الصوت كخيار أول...")
@@ -720,8 +724,8 @@ def main():
             )
             report_text = response.text
         except Exception as api_err:
-            # إذا كان الملف الذي تم رفعه هو الفيديو الكامل، نحاول استخراج الصوت وتجربته كبديل تلقائي
-            if file_to_upload == VIDEO_PATH:
+            # إذا كان الملف الذي تم رفعه هو الفيديو الكامل ووضع المعالجة هو audio_fallback، نحاول استخراج الصوت كبديل تلقائي
+            if file_to_upload == VIDEO_PATH and PROCESSING_MODE == "audio_fallback":
                 print(f"⚠️ فشل التحليل باستخدام الفيديو الكامل: {api_err}")
                 print("📌 محاولة استخراج الصوت ورفعه كخيار بديل لتفادي المشكلة...")
                 
