@@ -341,6 +341,54 @@ def write_error_report(error_stage: str, exception: Exception) -> None:
     تكتب تفاصيل أي خطأ يحدث أثناء التنفيذ داخل ملف المخرجات النهائي،
     بدلاً من السماح للسكربت بالتوقف بشكل مفاجئ دون تفسير للمستخدم.
     """
+    # تحميل إحصائيات الكوتة والتكلفة الحالية للمساعدة في التشخيص عند الفشل
+    quota_details = ""
+    try:
+        tracker = load_usage_tracker()
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        
+        # تحديد حدود الكوتة للموديل الحالي
+        model_key = None
+        for key in FREE_TIER_LIMITS:
+            if key in MODEL_NAME.lower():
+                model_key = key
+                break
+        if not model_key:
+            if "pro" in MODEL_NAME.lower():
+                model_key = "gemini-1.5-pro"
+            else:
+                model_key = "gemini-3.5-flash"
+                
+        limits = FREE_TIER_LIMITS.get(model_key, {"rpd": 1500, "tpm": 1_000_000, "rpm": 15})
+        max_rpd = limits["rpd"]
+        
+        spent_rpd = tracker["daily_usage"]["requests"]
+        remaining_rpd = max(0, max_rpd - spent_rpd)
+        percentage_rpd = (spent_rpd / max_rpd) * 100 if max_rpd > 0 else 0
+        
+        quota_details = (
+            f"\n\n---\n"
+            f"### 📊 تقرير حالة الكوتة التراكمية عند حدوث الخطأ (Quota Status at Failure)\n\n"
+            f"**الإحصائيات اليومية التراكمية ({today_str}):**\n"
+            f"- **إجمالي الطلبات المستهلكة اليوم (Spent Quota):** {spent_rpd:,} من {max_rpd:,} طلب ({percentage_rpd:.2f}%)\n"
+            f"- **الطلبات اليومية المتبقية (Remaining Quota):** {remaining_rpd:,} طلب\n"
+            f"- **إجمالي التكلفة التراكمية اليوم:** `${tracker['daily_usage']['cost']:.6f}` USD\n\n"
+            f"**الإحصائيات التراكمية مدى الحياة (Lifetime Stats):**\n"
+            f"- **إجمالي الطلبات:** {tracker['lifetime_usage']['requests']:,} طلب\n"
+            f"- **إجمالي التكلفة التراكمية:** `${tracker['lifetime_usage']['cost']:.6f}` USD\n"
+        )
+        
+        # طباعة ملخص الكوتة في الطرفية أيضاً عند حدوث خطأ
+        print("\n" + "=" * 70)
+        print("⚠️ حدث خطأ في التشغيل. حالة الكوتة الحالية:")
+        print("-" * 70)
+        print(f"• الطلبات اليومية المستهلكة: {spent_rpd:,} / {max_rpd:,} ({percentage_rpd:.2f}%)")
+        print(f"• الطلبات اليومية المتبقية: {remaining_rpd:,}")
+        print(f"• التكلفة التراكمية الكلية: ${tracker['lifetime_usage']['cost']:.6f} USD")
+        print("=" * 70 + "\n")
+    except Exception as tracker_err:
+        quota_details = f"\n\n*(تعذر تحميل تفاصيل الكوتة: {tracker_err})*"
+
     error_details = (
         f"# ⚠️ تقرير خطأ - فشل تقييم الفيديو\n\n"
         f"**تاريخ ووقت الخطأ:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
@@ -348,6 +396,7 @@ def write_error_report(error_stage: str, exception: Exception) -> None:
         f"**نوع الخطأ:** {type(exception).__name__}\n\n"
         f"**رسالة الخطأ:**\n```\n{str(exception)}\n```\n\n"
         f"**تفاصيل تقنية كاملة (Traceback):**\n```\n{traceback.format_exc()}\n```\n"
+        f"{quota_details}"
     )
     try:
         with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
