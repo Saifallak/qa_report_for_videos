@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local data and secrets
+.env
+data/
+*.mp4
+*.mp3
+qa_report.txt
+gemini_usage_tracker.json
+cookies.txt
+
+# IDEs and OS
+.DS_Store
+.idea/
+.vscode/
