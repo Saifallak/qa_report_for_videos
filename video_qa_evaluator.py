@@ -686,6 +686,31 @@ def generate_content_with_retry(client, model: str, contents, max_retries: int =
     raise last_err
 
 
+def count_tokens_with_retry(client, model: str, contents, max_retries: int = 5, base_wait: int = 15):
+    """
+    نفس منطق إعادة المحاولة الأسية لكن لطلبات count_tokens.
+    """
+    last_err = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            return client.models.count_tokens(model=model, contents=contents)
+        except Exception as e:
+            err_str = str(e)
+            is_retryable = (
+                "503" in err_str or "UNAVAILABLE" in err_str or
+                "429" in err_str or "RESOURCE_EXHAUSTED" in err_str
+            )
+            if is_retryable and attempt < max_retries:
+                wait_sec = base_wait * (2 ** (attempt - 1))
+                print(f"⏳ [count_tokens] المحاولة {attempt}/{max_retries} فشلت — إعادة بعد {wait_sec}s...")
+                time.sleep(wait_sec)
+                last_err = e
+            else:
+                raise e
+    raise last_err
+
+
+
 # ==============================================================================
 # 6) دالة رفع الملف إلى Gemini File API وانتظار اكتمال المعالجة
 # ==============================================================================
@@ -901,9 +926,9 @@ def main():
                 
                 # حساب التوكنز الفعلية للجزء
                 try:
-                    token_count_resp = client.models.count_tokens(
-                        model=MODEL_NAME,
-                        contents=[uploaded_part_ref, EVALUATION_PROMPT]
+                    token_count_resp = count_tokens_with_retry(
+                        client, MODEL_NAME,
+                        [uploaded_part_ref, EVALUATION_PROMPT]
                     )
                     print(f"🎯 التوكنز الفعلية للجزء {idx+1}: {token_count_resp.total_tokens:,} توكن.")
                 except Exception as cnt_err:
@@ -983,9 +1008,9 @@ def main():
             # حساب التوكنز الفعلية قبل إرسال الطلب للموديل لتوفير معلومات دقيقة للمستخدم
             try:
                 print("📊 جارٍ حساب التوكنز الفعلية للطلب...")
-                token_count_resp = client.models.count_tokens(
-                    model=MODEL_NAME,
-                    contents=[uploaded_file_ref, EVALUATION_PROMPT]
+                token_count_resp = count_tokens_with_retry(
+                    client, MODEL_NAME,
+                    [uploaded_file_ref, EVALUATION_PROMPT]
                 )
                 exact_tokens = token_count_resp.total_tokens
                 print(f"🎯 التوكنز الفعلية للطلب (الملف + البرومبت): {exact_tokens:,} توكن.")
