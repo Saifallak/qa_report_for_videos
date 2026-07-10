@@ -48,23 +48,23 @@ except ImportError:
 
 # يقرأ كل متغير أولاً من Environment Variable (مهم عند التشغيل عبر Docker)،
 # وإن لم يكن موجوداً يستخدم القيمة الافتراضية المكتوبة هنا مباشرة.
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "ضع_مفتاح_API_الخاص_بك_هنا")
-VIDEO_PATH = os.environ.get("VIDEO_PATH", "/app/data/input_video.mp4")
-OUTPUT_FILE = os.environ.get("OUTPUT_FILE", "/app/data/qa_report.txt")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "ضع_مفتاح_API_الخاص_بك_هنا").strip('"\' ')
+VIDEO_PATH = os.environ.get("VIDEO_PATH", "/app/data/input_video.mp4").strip('"\' ')
+OUTPUT_FILE = os.environ.get("OUTPUT_FILE", "/app/data/qa_report.txt").strip('"\' ')
 
 # (اختياري) رابط تحميل مباشر للفيديو (مثال: رابط مشاركة SharePoint/OneDrive).
 # لو تم ضبط هذا المتغير، سيقوم السكربت بتحميل الفيديو تلقائياً إلى VIDEO_PATH
 # قبل البدء في أي معالجة. اتركه فارغاً "" لو الفيديو موجود محلياً بالفعل.
-VIDEO_URL = os.environ.get("VIDEO_URL", "")
+VIDEO_URL = os.environ.get("VIDEO_URL", "").strip('"\' ')
 
 # (اختياري) مسار ملف كوكيز الجلسة (بصيغة Netscape cookies.txt) المُصدَّر من
 # متصفحك بعد تسجيل الدخول، مطلوب فقط لو الرابط محمي بمصادقة (مثل SharePoint
 # الخاص بمؤسسة). اتركه فارغاً "" لو الرابط عام ولا يحتاج تسجيل دخول.
-COOKIES_FILE = os.environ.get("COOKIES_FILE", "/app/data/cookies.txt")
+COOKIES_FILE = os.environ.get("COOKIES_FILE", "/app/data/cookies.txt").strip('"\' ')
 
 # اسم الموديل - يفضل موديل يدعم الفيديو الطويل ونافذة سياق كبيرة
 # تم اختيار gemini-3.5-flash لأنه أحدث موديل بفري تير فعّال (مش مجرد سعر معلن)
-MODEL_NAME = os.environ.get("MODEL_NAME", "gemini-3.5-flash")
+MODEL_NAME = os.environ.get("MODEL_NAME", "gemini-3.5-flash").strip('"\' ')
 
 # مسار الصوت المستخرج مؤقتاً (سيتم حذفه تلقائياً بعد الانتهاء)
 TEMP_AUDIO_PATH = "/tmp/temp_extracted_audio.mp3"
@@ -73,10 +73,10 @@ TEMP_AUDIO_PATH = "/tmp/temp_extracted_audio.mp3"
 # - "audio": استخراج الصوت ورفعه فقط (توفيراً للتوكنز والوقت). إذا فشل ffmpeg، يفشل السكربت.
 # - "video": رفع الفيديو الأصلي مباشرة دون أي محاولة لاستخراج الصوت.
 # - "auto": المحاولة الأولى هي استخراج الصوت ورفعه، وإذا فشل الاستخراج أو لم يتوفر ffmpeg يتم رفع الفيديو كاملاً كخطة بديلة (Fallback).
-PROCESSING_MODE = os.environ.get("PROCESSING_MODE", "auto").lower()
+PROCESSING_MODE = os.environ.get("PROCESSING_MODE", "auto").lower().strip('"\' ')
 
 # مسار ملف تتبع استهلاك الكوتة والتكلفة التراكمية
-USAGE_TRACKER_FILE = os.environ.get("USAGE_TRACKER_FILE", "/app/data/gemini_usage_tracker.json")
+USAGE_TRACKER_FILE = os.environ.get("USAGE_TRACKER_FILE", "/app/data/gemini_usage_tracker.json").strip('"\' ')
 
 # الحد الأقصى لوقت الانتظار (بالثواني) أثناء معالجة الملف على سيرفرات Google
 MAX_PROCESSING_WAIT_SECONDS = 1200  # 20 دقيقة كحد أقصى لملف كبير
