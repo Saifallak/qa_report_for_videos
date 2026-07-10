@@ -653,7 +653,43 @@ def extract_audio_with_ffmpeg(video_path: str, audio_output_path: str) -> bool:
 
 
 # ==============================================================================
-# 5) دالة رفع الملف إلى Gemini File API وانتظار اكتمال المعالجة
+# 5) دالة مساعدة: إرسال طلب للموديل مع إعادة المحاولة التلقائية عند الازدحام
+# ==============================================================================
+
+def generate_content_with_retry(client, model: str, contents, max_retries: int = 5, base_wait: int = 15):
+    """
+    يرسل طلب generate_content مع إعادة المحاولة التلقائية عند:
+    - 503 UNAVAILABLE (الموديل مشغول مؤقتاً)
+    - 429 RESOURCE_EXHAUSTED (تجاوز حد الطلبات في الدقيقة)
+    مع انتظار متزايد بين كل محاولة (Exponential Backoff).
+    """
+    from google.genai import errors as genai_errors
+    last_err = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            return client.models.generate_content(model=model, contents=contents)
+        except Exception as e:
+            # نتحقق من كود الخطأ
+            is_retryable = False
+            err_str = str(e)
+            if "503" in err_str or "UNAVAILABLE" in err_str:
+                is_retryable = True
+            elif "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                is_retryable = True
+
+            if is_retryable and attempt < max_retries:
+                wait_sec = base_wait * attempt  # 15s, 30s, 45s, 60s
+                print(f"⏳ المحاولة {attempt}/{max_retries} فشلت ({err_str[:80]}...)")
+                print(f"   سيتم إعادة المحاولة بعد {wait_sec} ثانية...")
+                time.sleep(wait_sec)
+                last_err = e
+            else:
+                raise e
+    raise last_err
+
+
+# ==============================================================================
+# 6) دالة رفع الملف إلى Gemini File API وانتظار اكتمال المعالجة
 # ==============================================================================
 
 def upload_and_wait_for_file(client, file_path: str):
@@ -877,9 +913,9 @@ def main():
                 
                 # إرسال طلب التحليل للجزء
                 print(f"🤖 تحليل الجزء {idx+1}...")
-                part_response = client.models.generate_content(
-                    model=MODEL_NAME,
-                    contents=[uploaded_part_ref, EVALUATION_PROMPT],
+                part_response = generate_content_with_retry(
+                    client, MODEL_NAME,
+                    [uploaded_part_ref, EVALUATION_PROMPT],
                 )
                 part_text = part_response.text
                 if not part_text or not part_text.strip():
@@ -923,9 +959,9 @@ def main():
             for idx, r_text in enumerate(part_reports):
                 merge_prompt += f"--- تقرير الجزء {idx+1} ---\n{r_text}\n\n"
                 
-            merge_response = client.models.generate_content(
-                model=MODEL_NAME,
-                contents=[merge_prompt],
+            merge_response = generate_content_with_retry(
+                client, MODEL_NAME,
+                [merge_prompt],
             )
             report_text = merge_response.text
             
@@ -967,9 +1003,9 @@ def main():
             print("   (قد تستغرق هذه الخطوة عدة دقائق نظراً لطول الفيديو)")
 
             try:
-                response = client.models.generate_content(
-                    model=MODEL_NAME,
-                    contents=[uploaded_file_ref, EVALUATION_PROMPT],
+                response = generate_content_with_retry(
+                    client, MODEL_NAME,
+                    [uploaded_file_ref, EVALUATION_PROMPT],
                 )
                 report_text = response.text
             except Exception as api_err:
@@ -991,9 +1027,9 @@ def main():
                             # رفع ملف الصوت الجديد
                             uploaded_file_ref = upload_and_wait_for_file(client, TEMP_AUDIO_PATH)
                             print("🤖 إعادة إرسال طلب التحليل إلى الموديل باستخدام ملف الصوت البديل...")
-                            response = client.models.generate_content(
-                                model=MODEL_NAME,
-                                contents=[uploaded_file_ref, EVALUATION_PROMPT],
+                            response = generate_content_with_retry(
+                                client, MODEL_NAME,
+                                [uploaded_file_ref, EVALUATION_PROMPT],
                             )
                             report_text = response.text
                             # تحديث مسار الملف المرفوع لضمان تنظيفه في كتلة finally
