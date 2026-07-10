@@ -76,6 +76,15 @@ TEMP_AUDIO_PATH = "/tmp/temp_extracted_audio.mp3"
 # - "auto": المحاولة الأولى هي استخراج الصوت ورفعه، وإذا فشل الاستخراج أو لم يتوفر ffmpeg يتم رفع الفيديو كاملاً كخطة بديلة (Fallback).
 PROCESSING_MODE = os.environ.get("PROCESSING_MODE", "auto").lower().strip('"\' ')
 
+# الإجراء الافتراضي عند تجاوز حد التوكنز (TOKEN_LIMIT_ACTION):
+# - "1": اكمل رفع الفيديو كاملاً بالرغم من التجاوز
+# - "2": قسّم الفيديو إلى أجزاء (45 دقيقة لكل جزء) وادمج النتائج
+# - "3": تحويل للصوت فقط (الأسرع والأوفر)
+# تُستخدم هذه القيمة كإجابة افتراضية في الوضع التفاعلي، وكإجابة وحيدة في الوضع غير التفاعلي.
+TOKEN_LIMIT_ACTION = os.environ.get("TOKEN_LIMIT_ACTION", "3").strip('"\' ')
+if TOKEN_LIMIT_ACTION not in ["1", "2", "3"]:
+    TOKEN_LIMIT_ACTION = "3"  # fallback آمن
+
 # مسار ملف تتبع استهلاك الكوتة والتكلفة التراكمية
 USAGE_TRACKER_FILE = os.environ.get("USAGE_TRACKER_FILE", "/app/data/gemini_usage_tracker.json").strip('"\' ')
 
@@ -803,7 +812,7 @@ def main():
                 if estimated_tokens > 1_000_000:
                     print(f"⚠️ تنبيه: الفيديو يتخطى الحد الأقصى للموديل ({estimated_tokens:,} > 1,000,000 توكن).")
                     
-                    choice = "3" # الافتراضي: معالجة الصوت فقط لتفادي الفشل
+                    choice = TOKEN_LIMIT_ACTION  # الافتراضي من .env
                     if sys.stdin.isatty():
                         print("\nالرجاء اختيار أحد الخيارات التالية لتفادي فشل العملية:")
                         print("1 - اكمل رفع الفيديو ؟")
@@ -811,7 +820,7 @@ def main():
                         print("3 - نروح للصوت وبس بقي")
                         
                         while True:
-                            choice = get_interactive_input("❓ أدخل رقم الخيار المناسب [1-3]", "3").strip()
+                            choice = get_interactive_input("❓ أدخل رقم الخيار المناسب [1-3]", TOKEN_LIMIT_ACTION).strip()
                             if choice in ["1", "2", "3"]:
                                 break
                             print("❌ إدخال غير صالح. الرجاء إدخال 1 أو 2 أو 3")
