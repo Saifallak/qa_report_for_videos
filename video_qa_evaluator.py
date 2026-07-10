@@ -359,9 +359,18 @@ def write_error_report(error_stage: str, exception: Exception) -> None:
         print(error_details)
 
 
-# ==============================================================================
-# 3.5) دالة تحميل الفيديو من رابط مباشر (مثل رابط مشاركة SharePoint) عبر wget
-# ==============================================================================
+def convert_sharepoint_url_to_download(url: str) -> str:
+    """
+    تحويل روابط SharePoint الخاصة بالفيديوهات والمستندات إلى روابط تحميل مباشر (Direct Download Link).
+    يتم استبدال المعاملات بعد علامة الاستفهام '?' بـ 'download=1'.
+    """
+    if "sharepoint.com" in url.lower():
+        base_url = url.split("?")[0]
+        download_url = f"{base_url}?download=1"
+        print(f"🔗 تم رصد رابط SharePoint. تم تحويل الرابط تلقائياً إلى رابط تحميل مباشر:\n   {download_url}")
+        return download_url
+    return url
+
 
 def download_video_from_url(video_url: str, destination_path: str, cookies_file: str) -> None:
     """
@@ -516,7 +525,8 @@ def main():
     # ------------------------------------------------------------------------
     if VIDEO_URL:
         try:
-            download_video_from_url(VIDEO_URL, VIDEO_PATH, COOKIES_FILE)
+            final_url = convert_sharepoint_url_to_download(VIDEO_URL)
+            download_video_from_url(final_url, VIDEO_PATH, COOKIES_FILE)
         except Exception as e:
             write_error_report("تحميل الفيديو من الرابط (VIDEO_URL)", e)
             return  # نوقف التنفيذ هنا لأنه لا يوجد فيديو للمتابعة به
