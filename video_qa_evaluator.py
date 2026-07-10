@@ -661,26 +661,24 @@ def generate_content_with_retry(client, model: str, contents, max_retries: int =
     يرسل طلب generate_content مع إعادة المحاولة التلقائية عند:
     - 503 UNAVAILABLE (الموديل مشغول مؤقتاً)
     - 429 RESOURCE_EXHAUSTED (تجاوز حد الطلبات في الدقيقة)
-    مع انتظار متزايد بين كل محاولة (Exponential Backoff).
+    مع انتظار أسي متزايد بين كل محاولة (Exponential Backoff):
+    المحاولة 1 → 15s | 2 → 30s | 3 → 60s | 4 → 120s | 5 → 240s
     """
-    from google.genai import errors as genai_errors
     last_err = None
     for attempt in range(1, max_retries + 1):
         try:
             return client.models.generate_content(model=model, contents=contents)
         except Exception as e:
-            # نتحقق من كود الخطأ
-            is_retryable = False
             err_str = str(e)
-            if "503" in err_str or "UNAVAILABLE" in err_str:
-                is_retryable = True
-            elif "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
-                is_retryable = True
+            is_retryable = (
+                "503" in err_str or "UNAVAILABLE" in err_str or
+                "429" in err_str or "RESOURCE_EXHAUSTED" in err_str
+            )
 
             if is_retryable and attempt < max_retries:
-                wait_sec = base_wait * attempt  # 15s, 30s, 45s, 60s
-                print(f"⏳ المحاولة {attempt}/{max_retries} فشلت ({err_str[:80]}...)")
-                print(f"   سيتم إعادة المحاولة بعد {wait_sec} ثانية...")
+                wait_sec = base_wait * (2 ** (attempt - 1))  # 15, 30, 60, 120, 240
+                print(f"⏳ المحاولة {attempt}/{max_retries} فشلت — ({err_str[:80]}...)")
+                print(f"   ⏱️  إعادة المحاولة بعد {wait_sec} ثانية (Exponential Backoff)...")
                 time.sleep(wait_sec)
                 last_err = e
             else:
