@@ -771,8 +771,23 @@ def main():
                 # إذا كانت التوكنز تتخطى 1 مليون، ونحن في وضع يسمح بالتحويل للصوت (auto أو audio_fallback)
                 if estimated_tokens > 1_000_000:
                     print(f"⚠️ تنبيه: الفيديو يتخطى الحد الأقصى للموديل ({estimated_tokens:,} > 1,000,000 توكن).")
+                    
+                    use_audio = False
                     if PROCESSING_MODE in ["auto", "audio_fallback"]:
-                        print("📌 سيتم التحويل تلقائياً لمعالجة الصوت فقط لتجنب فشل العملية وتوفير وقت الرفع والتوكنز...")
+                        if sys.stdin.isatty():
+                            # نطلب قرار المستخدم تفاعلياً
+                            user_decision = get_interactive_input(
+                                "❓ هل تريد التحويل لاستخراج الصوت فقط لتفادي الفشل وتوفير كوتة الرفع؟ (yes / no)", 
+                                "yes"
+                            ).lower()
+                            if user_decision in ["y", "yes", "نعم"]:
+                                use_audio = True
+                        else:
+                            # في الوضع غير التفاعلي، نفترض القبول التلقائي للحفاظ على استمرار العمل
+                            use_audio = True
+
+                    if use_audio:
+                        print("📌 تم اختيار التحويل لمعالجة الصوت فقط...")
                         # استخراج الصوت وتحويل مسار الرفع إليه
                         audio_extracted = extract_audio_with_ffmpeg(VIDEO_PATH, TEMP_AUDIO_PATH)
                         if audio_extracted:
@@ -783,7 +798,7 @@ def main():
                         else:
                             print("⚠️ تعذر استخراج الصوت، سيتم محاولة رفع الفيديو بالرغم من كبر حجمه.")
                     else:
-                        print("⚠️ تحذير: قد تفشل العملية بسبب تخطي حدود الموديل. ننصح باستخدام وضع audio أو audio_fallback للجلسات الطويلة.")
+                        print("⚠️ سيتم المتابعة ورفع ملف الفيديو بالرغم من تجاوز الحد الأقصى المتوقع للتوكنز.")
 
         # ------------------------------------------------------------------
         # الخطوة 3: رفع الملف إلى Gemini File API وانتظار اكتمال المعالجة
